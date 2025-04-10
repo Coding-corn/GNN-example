@@ -73,7 +73,7 @@ if __name__ == '__main__':
         plt.bar(x, y)
         plt.ylabel(ylabel="Percentage")
         plt.grid(True, which="both", ls=":")
-        plt.xticks(rotation=90)
+        plt.xticks()
         plt.title('Percentage of Fraudulent Cases by DOB')
         plt.savefig('dob.png', bbox_inches="tight", dpi=dpi)
         plt.show()
