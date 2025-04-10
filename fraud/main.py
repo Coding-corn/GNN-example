@@ -52,7 +52,7 @@ if __name__ == '__main__':
 
 
     def plotAgeData(df):
-        # TODO Plot the percentage share of fraudulent parameters by age of credit card holder
+        # Plot the percentage share of fraudulent parameters by age of credit card holder
         # Extract the earliest to most recent date of birth in YYYY-MM-DD format
         dob = sorted(df['dob'].unique())
         # Extract only the years
@@ -80,15 +80,15 @@ if __name__ == '__main__':
 
 
     def plotStateData(df):
-        # TODO Plot bar chart based on the state which credit card holder resides in
+        # TODO Plot the total number of samples taken from each respective state. May have to normalise wrt to total number of residents in the state to calculate weight
         # Plot the percentage share of fraudulent parameters by the state in which the credit card users reside in
         # State
-        state = sorted(df['category'].unique())
+        state = sorted(df['state'].unique())
         # Create dictionary to store percentage of fraudulent cases per state. Plot the graph thereafter
         stateDict = dict.fromkeys(state)
         for cat_ in state:
             # Get the rows of the dataframe which correspond to the respective state
-            a = df[df["category"].str.contains(cat_)]
+            a = df[df["state"].str.contains(cat_)]
             # Get the number of fraudulent and non-fraudulent cases
             a = a['is_fraud'].value_counts()
             # Assign value to respective key in dictionary
@@ -103,6 +103,31 @@ if __name__ == '__main__':
         plt.title('Percentage of Fraudulent Cases by State')
         plt.savefig('state.png', bbox_inches="tight", dpi=dpi)
         plt.show()
+
+
+    def plotJobData(df):
+        # TODO xlabel is too cluttered due to the number of unique jobs. Need to reformat the figure
+        # Plot barchart based on occupation of the credit card holder
+        job = sorted(df['job'].unique())
+        jobDict = dict.fromkeys(job)
+        for job_ in job:
+            a = df[df["job"].str.contains(job_)]
+            a = a['is_fraud'].value_counts()
+            jobDict[job_] = fraudShare(a)
+        del a
+        x, y = zip(*sorted(jobDict.items()))
+        plt.bar(x, y)
+        plt.ylabel(ylabel="Percentage")
+        plt.grid(True, which="both", ls=":")
+        plt.xticks(rotation=90)
+        plt.title('Percentage of Fraudulent Cases by Job')
+        plt.savefig('job.png', bbox_inches="tight", dpi=dpi)
+        plt.show()
+
+
+    def plotDistData(df):
+        # TODO Plot barchart based on distance between credit card holder and merchant wrt latitude and longitude
+        pass
 
 
     def knnFun():
@@ -131,8 +156,9 @@ if __name__ == '__main__':
         tic = time.time()
 
         # plotCatData(concatSet)
-        plotAgeData(concatSet)
+        # plotAgeData(concatSet)
         # plotStateData(concatSet)
+        plotJobData(concatSet)
         # knnFun()
 
         toc = time.time()
