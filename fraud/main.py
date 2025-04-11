@@ -222,10 +222,15 @@ if __name__ == '__main__':
         plt.show()
 
 
-    # TODO Analyse the amount spent for each category, and whether or not it is fraudulent
     def plotCatAmtData(df):
-        pass
-    # TODO Create scatter plot of the category wrt to amount spent to check for any correlation
+        # Scatter plot of amount spent for each category, and whether it is fraudulent
+        plt.figure(figsize=(1500 / dpi, 750 / dpi), dpi=dpi)
+        df.plot.scatter(x='category', y='amt', c='is_fraud', cmap='viridis')
+        plt.ylabel(ylabel="Amount")
+        plt.xticks(rotation=90)
+        plt.title('Scatter Plot of Amount Spent per Category')
+        plt.savefig('catAmt.png', bbox_inches="tight", dpi=dpi)
+        plt.show()
 
 
     def knnFun():
@@ -249,7 +254,7 @@ if __name__ == '__main__':
     # ----------------------------------------------End of preamble ----------------------------------------------------
 
     # Choose whether to use all or a truncated version of the data set
-    simplify = False
+    simplify = True
     if simplify:
         trainSet = trainSet[:int(9e2)]
         valSet = valSet[:int(1e2)]
