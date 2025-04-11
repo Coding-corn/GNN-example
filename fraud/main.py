@@ -45,6 +45,7 @@ if __name__ == '__main__':
         del a
         # Plot bar chart of fraudulent cases per category
         x, y = zip(*sorted(catDict.items()))
+        # TODO Rotate bar chart
         plt.figure(figsize=(1500 / dpi, 750 / dpi), dpi=dpi)
         plt.bar(x, y)
         plt.ylabel(ylabel="Percentage")
@@ -175,7 +176,7 @@ if __name__ == '__main__':
         def compute_distance(i):
             return geopy.distance.geodesic(user[i], merch[i]).km
 
-        # TODO Plot barchart based on distance between credit card holder and merchant wrt latitude and longitude
+        # Plot barchart based on distance between credit card holder and merchant wrt latitude and longitude
         lat = df["lat"].tolist()
         long = df["long"].tolist()
         merch_lat = df["merch_lat"].tolist()
@@ -192,12 +193,40 @@ if __name__ == '__main__':
         else:
             dist = [geopy.distance.geodesic(user[i], merch[i]).km for i in range(df.shape[0])]
         del lat, long, merch_lat, merch_long, user, merch
-        concatSet['dist'] = dist
-        pass
+        df['dist'] = dist
+        # Sort distances in ascending order
+        dist = np.asarray(dist)
+        dist.sort()
+        # Split array of distances into equal sized groups
+        grp = 10
+        dist = np.array_split(dist, grp)
+        # Dictionary keys correspond to the average within each interval
+        distDict = dict.fromkeys([np.mean(_) for _ in dist])
+        for dist_ in dist:
+            # Extract rows of dataframe which lie between maximum and minimum distance within respective interval
+            a = df[df['dist'].between(dist_[0], dist_[-1])]
+            # Get the number of fraudulent and non-fraudulent cases
+            a = a['is_fraud'].value_counts()
+            # Assign value to respective key in dictionary
+            distDict[np.mean(dist_)] = fraudShare(a)
+        del a, dist_, dist, grp
+        # Plot bar chart of fraudulent cases by distance interval
+        x, y = zip(*sorted(distDict.items()))
+        plt.figure(figsize=(1500 / dpi, 750 / dpi), dpi=dpi)
+        plt.bar(x, y)
+        plt.ylabel(ylabel="Percentage")
+        plt.grid(True, which="both", ls=":")
+        plt.xticks()
+        plt.title('Percentage of Fraudulent Cases by Distance')
+        plt.savefig('dist.png', bbox_inches="tight", dpi=dpi)
+        plt.show()
 
 
     # TODO Analyse the amount spent for each category, and whether or not it is fraudulent
+    def plotCatAmtData(df):
+        pass
     # TODO Create scatter plot of the category wrt to amount spent to check for any correlation
+
 
     def knnFun():
         # TODO Implement the k nearest neighbour algorithm
@@ -216,16 +245,16 @@ if __name__ == '__main__':
     trainSet, valSet = _[:int(0.9 * _.shape[0])], _[int(0.9 * _.shape[0]):]
     testSet = pd.read_csv(os.path.join(THIS_FOLDER, 'data/fraudTest.csv')).sample(frac=1, random_state=42)
     # Concatenated training, validation and test set for analysis
-    concatSet = pd.concat([trainSet, valSet, testSet], axis=0)
+    conSet = pd.concat([trainSet, valSet, testSet], axis=0)
     # ----------------------------------------------End of preamble ----------------------------------------------------
 
     # Choose whether to use all or a truncated version of the data set
-    simplify = True
+    simplify = False
     if simplify:
         trainSet = trainSet[:int(9e2)]
         valSet = valSet[:int(1e2)]
         testSet = testSet[:int(1e2)]
-        concatSet = concatSet[:int(1e5)]
+        conSet = conSet[:int(1e4)]
 
     # Decide if parallel computing should be used
     parallel = False
@@ -236,11 +265,12 @@ if __name__ == '__main__':
     if not plotFromCsv:
         tic = time.time()
 
-        # plotCatData(concatSet)
-        plotAgeData(concatSet)
-        plotStateData(concatSet)
-        # plotJobData(concatSet)
-        # plotDistData(concatSet,parallel)
+        # plotCatData(conSet)
+        # plotAgeData(conSet)
+        # plotStateData(conSet)
+        # plotJobData(conSet)
+        # plotDistData(conSet, parallel)
+        plotCatAmtData(conSet)
         # knnFun()
 
         toc = time.time()
