@@ -274,8 +274,8 @@ if __name__ == '__main__':
         # plotAgeData(conSet)
         # plotStateData(conSet)
         # plotJobData(conSet)
-        # plotDistData(conSet, parallel)
-        plotCatAmtData(conSet)
+        plotDistData(conSet, parallel)
+        # plotCatAmtData(conSet)
         # knnFun()
 
         toc = time.time()
