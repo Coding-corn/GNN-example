@@ -10,8 +10,7 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
 # TODO Need to update values, and revert
-# plt.rcParams['figure.dpi'] = 96
-plt.rcParams['figure.dpi'] = 30
+plt.rcParams['figure.dpi'] = 96
 plt.rcParams.update({'font.size': 24})
 from torch_geometric.datasets import Planetoid
 from torch_geometric.utils import degree
@@ -110,7 +109,7 @@ if __name__ == '__main__':
         criterion = torch.nn.CrossEntropyLoss()
         optimizer = model.optimizer
 
-        # TODO Return embedding and output list
+        # Data for animations
         embeddings = []
         outputs = []
         losses = []
@@ -201,28 +200,29 @@ if __name__ == '__main__':
     plt.savefig('embedEpoch' + str(epoch) + '.png')
     plt.show()
 
-    # TODO Create and save animation of tSNE evolution wrt time
-    def animEmbedtSNE(i):
-        h = embeddings[i]
-        # Train TSNE
-        tsne = TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(h.detach())
-        plt.scatter(tsne[:, 0], tsne[:, 1], s=50, c=data.y)
-        # TODO Plots are superimposed. Fix it
-        plt.title(f'Embedding tSNE\nEpoch {i*epochGran} | Loss: {losses[i]:.2f} | Acc: {accuracies[i] * 100:.2f}%',
-                  fontsize=18, pad=20)
+    # TODO Revert to True
+    animEmbedtSNESave = False
+    if animEmbedtSNESave:
+        # Create and save animation of tSNE evolution wrt time
+        def animEmbedtSNE(i):
+            plt.cla()  # Clear the current axes
+            h = embeddings[i]
+            # Train TSNE
+            tsne = TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(h.detach())
+            plt.scatter(tsne[:, 0], tsne[:, 1], s=50, c=data.y)
+            plt.title(f'Embedding tSNE\nEpoch {i*epochGran} | Loss: {losses[i]:.2f} | Acc: {accuracies[i] * 100:.2f}%',
+                      fontsize=18, pad=20)
 
-    fig = plt.figure(figsize=(10, 10))
-    plt.axis('off')
-    anim = animation.FuncAnimation(fig, animEmbedtSNE, frames=np.arange(0, len(embeddings)), interval=500)
-    animName = "tSNEEmbedAnim"
-    anim.save(animName + ".mp4", writer="ffmpeg")
-    anim.save(animName + ".gif", writer="pillow")
+        fig = plt.figure(figsize=(10, 10))
+        plt.axis('off')
+        anim = animation.FuncAnimation(fig, animEmbedtSNE, frames=np.arange(0, len(embeddings)), interval=500)
+        animName = "tSNEEmbedAnim"
+        anim.save(animName + ".mp4", writer="ffmpeg")
+        anim.save(animName + ".gif", writer="pillow")
 
     """Plot bar chart of accuracy wrt node degree of trained GAT"""
-    # TODO Extract output
     # Get model's classifications
-    _, out = gat(data.x, data.edge_index)
-
+    out = outputs[-1]
     # Calculate the degree of each node
     degrees = degree(data.edge_index[0]).numpy()
 
@@ -233,12 +233,11 @@ if __name__ == '__main__':
     # Accuracy for degrees between 0 and 5
     for i in range(0, 6):
         mask = np.where(degrees == i)[0]
-        accuracies.append(accuracy(out.argmax(dim=1)[mask], data.y[mask]))
+        accuracies.append(accuracy(out[mask], data.y[mask]))
         sizes.append(len(mask))
-
     # Accuracy for degrees > 5
     mask = np.where(degrees > 5)[0]
-    accuracies.append(accuracy(out.argmax(dim=1)[mask], data.y[mask]))
+    accuracies.append(accuracy(out[mask], data.y[mask]))
     sizes.append(len(mask))
 
     # Bar plot
@@ -256,8 +255,11 @@ if __name__ == '__main__':
     plt.savefig('accNodeDegreeEpoch' + str(epoch) + '.png')
     plt.show()
 
+    # TODO Create and save animation of accuracy
+    animNodeAccSave = True
+    if animNodeAccSave:
+        pass
+
     toc = time.time()
     print("All simulations completed. Program terminating. Total time taken was",
           str(datetime.timedelta(seconds=toc - tic)))
-
-    # TODO Create and save animation of accuracy
