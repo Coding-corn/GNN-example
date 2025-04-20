@@ -1,6 +1,5 @@
 import datetime
 import time
-
 import numpy as np
 import torch
 from matplotlib import animation
@@ -9,7 +8,6 @@ np.random.seed(0)
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
-# TODO Need to update values, and revert
 plt.rcParams['figure.dpi'] = 96
 plt.rcParams.update({'font.size': 24})
 from torch_geometric.datasets import Planetoid
@@ -23,9 +21,7 @@ This script is based on the example provided in https://mlabonne.github.io/blog/
 """
 
 if __name__ == '__main__':
-    # TODO Revert
-    epoch = 10
-    # epoch = 200
+    epoch = 200
     # Defines the number of epochs between every animation frame
     epochGran = 5
 
@@ -52,10 +48,6 @@ if __name__ == '__main__':
     plt.xlim(min(numbers.keys()), max(numbers.keys()))
     plt.savefig('nodeDegree.png', bbox_inches="tight")
     plt.show()
-
-    # TODO Use tSNE visualisation on original dataset
-    # TODO Use TSNE visualisation here after training and compare with results before training.
-    #  Check perplexity value which garners the lowest KL divergence
 
     """Create models"""
 
@@ -155,8 +147,7 @@ if __name__ == '__main__':
 
 
     """Train and test models"""
-    # TODO Revert to True
-    gcnSim = False
+    gcnSim = True
     if gcnSim:
         # Create GCN model
         gcn = GCN(dataset.num_features, 16, dataset.num_classes)
@@ -200,8 +191,7 @@ if __name__ == '__main__':
     plt.savefig('embedEpoch' + str(epoch) + '.png')
     plt.show()
 
-    # TODO Revert to True
-    animEmbedtSNESave = False
+    animEmbedtSNESave = True
     if animEmbedtSNESave:
         # Create and save animation of tSNE evolution wrt time
         def animEmbedtSNE(i):
@@ -210,11 +200,13 @@ if __name__ == '__main__':
             # Train TSNE
             tsne = TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(h.detach())
             plt.scatter(tsne[:, 0], tsne[:, 1], s=50, c=data.y)
-            plt.title(f'Embedding tSNE\nEpoch {i*epochGran} | Loss: {losses[i]:.2f} | Acc: {accuracies[i] * 100:.2f}%',
-                      fontsize=18, pad=20)
+            plt.axis('off')
+            plt.title(
+                f'Embedding tSNE\nEpoch {i * epochGran} | Loss: {losses[i]:.2f} | Acc: {accuracies[i] * 100:.2f}%',
+                fontsize=18, pad=20)
+
 
         fig = plt.figure(figsize=(10, 10))
-        plt.axis('off')
         anim = animation.FuncAnimation(fig, animEmbedtSNE, frames=len(embeddings), interval=500)
         animName = "tSNEEmbedAnim"
         anim.save(animName + ".mp4", writer="ffmpeg")
@@ -256,14 +248,13 @@ if __name__ == '__main__':
     plt.show()
 
     # Create and save animation of node accuracy distribution wrt time
-    # TODO Revert to True
-    animNodeAccSave = False
+    animNodeAccSave = True
     if animNodeAccSave:
         def animNodeAcc(i):
             plt.cla()  # Clear the current axes
             ax.set_xlabel('Node Degree')
             ax.set_ylabel('Accuracy Score')
-            plt.title(f'Node Accuracy Distribution\nEpoch {i*epochGran} | Loss: {losses[i]:.2f}',
+            plt.title(f'Node Accuracy Distribution\nEpoch {i * epochGran} | Loss: {losses[i]:.2f}',
                       fontsize=18, pad=20)
 
             # Get model's classifications
@@ -284,6 +275,7 @@ if __name__ == '__main__':
             for i in range(0, 7):
                 plt.text(i, accuracies[i], f'{accuracies[i] * 100:.2f}%', ha='center', color='#0A047A')
                 plt.text(i, accuracies[i] // 2, sizes[i], ha='center', color='white')
+
 
         # Bar plot
         fig, ax = plt.subplots(figsize=(18, 9))
