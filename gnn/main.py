@@ -215,7 +215,7 @@ if __name__ == '__main__':
 
         fig = plt.figure(figsize=(10, 10))
         plt.axis('off')
-        anim = animation.FuncAnimation(fig, animEmbedtSNE, frames=np.arange(0, len(embeddings)), interval=500)
+        anim = animation.FuncAnimation(fig, animEmbedtSNE, frames=len(embeddings), interval=500)
         animName = "tSNEEmbedAnim"
         anim.save(animName + ".mp4", writer="ffmpeg")
         anim.save(animName + ".gif", writer="pillow")
@@ -251,14 +251,47 @@ if __name__ == '__main__':
     for i in range(0, 7):
         plt.text(i, accuracies[i], f'{accuracies[i] * 100:.2f}%', ha='center', color='#0A047A')
         plt.text(i, accuracies[i] // 2, sizes[i], ha='center', color='white')
-    plt.title('Accuracy Distribution after Training')
+    plt.title('Node Accuracy Distribution after Training')
     plt.savefig('accNodeDegreeEpoch' + str(epoch) + '.png')
     plt.show()
 
-    # TODO Create and save animation of accuracy
-    animNodeAccSave = True
+    # Create and save animation of node accuracy distribution wrt time
+    # TODO Revert to True
+    animNodeAccSave = False
     if animNodeAccSave:
-        pass
+        def animNodeAcc(i):
+            plt.cla()  # Clear the current axes
+            ax.set_xlabel('Node Degree')
+            ax.set_ylabel('Accuracy Score')
+            plt.title(f'Node Accuracy Distribution\nEpoch {i*epochGran} | Loss: {losses[i]:.2f}',
+                      fontsize=18, pad=20)
+
+            # Get model's classifications
+            out = outputs[i]
+            accuracies = []
+
+            # Accuracy for degrees between 0 and 5
+            for i in range(0, 6):
+                mask = np.where(degrees == i)[0]
+                accuracies.append(accuracy(out[mask], data.y[mask]))
+            # Accuracy for degrees > 5
+            mask = np.where(degrees > 5)[0]
+            accuracies.append(accuracy(out[mask], data.y[mask]))
+
+            plt.bar(['0', '1', '2', '3', '4', '5', '>5'],
+                    accuracies,
+                    color='#0A047A')
+            for i in range(0, 7):
+                plt.text(i, accuracies[i], f'{accuracies[i] * 100:.2f}%', ha='center', color='#0A047A')
+                plt.text(i, accuracies[i] // 2, sizes[i], ha='center', color='white')
+
+        # Bar plot
+        fig, ax = plt.subplots(figsize=(18, 9))
+        ax.set_facecolor('#EFEEEA')
+        anim = animation.FuncAnimation(fig, animNodeAcc, frames=len(outputs), interval=500)
+        animName = "nodeAccAnim"
+        anim.save(animName + ".mp4", writer="ffmpeg")
+        anim.save(animName + ".gif", writer="pillow")
 
     toc = time.time()
     print("All simulations completed. Program terminating. Total time taken was",
