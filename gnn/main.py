@@ -3,12 +3,15 @@ import time
 
 import numpy as np
 import torch
+from matplotlib import animation
 
 np.random.seed(0)
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
-# TODO Need to update values
-plt.rcParams['figure.dpi'] = 96
+
+# TODO Need to update values, and revert
+# plt.rcParams['figure.dpi'] = 96
+plt.rcParams['figure.dpi'] = 30
 plt.rcParams.update({'font.size': 24})
 from torch_geometric.datasets import Planetoid
 from torch_geometric.utils import degree
@@ -52,6 +55,8 @@ if __name__ == '__main__':
     plt.show()
 
     # TODO Use tSNE visualisation on original dataset
+    # TODO Use TSNE visualisation here after training and compare with results before training.
+    #  Check perplexity value which garners the lowest KL divergence
 
     """Create models"""
 
@@ -108,28 +113,37 @@ if __name__ == '__main__':
         # TODO Return embedding and output list
         embeddings = []
         outputs = []
+        losses = []
+        accuracies = []
 
         model.train()
         for epoch_ in range(epoch + 1):
             # Training
             optimizer.zero_grad()
-            _, out = model(data.x, data.edge_index)
+            h, out = model(data.x, data.edge_index)
             loss = criterion(out[data.train_mask], data.y[data.train_mask])
             acc = accuracy(out[data.train_mask].argmax(dim=1), data.y[data.train_mask])
             loss.backward()
             optimizer.step()
+
+            # Store data for animations
+            if epoch_ % epochGran == 0:
+                embeddings.append(h)
+                outputs.append(out.argmax(dim=1))
+                losses.append(loss)
+                accuracies.append(acc)
 
             # Validation
             val_loss = criterion(out[data.val_mask], data.y[data.val_mask])
             val_acc = accuracy(out[data.val_mask].argmax(dim=1), data.y[data.val_mask])
 
             # Print metrics
-            if (epoch_ % epochGran == 0):
+            if epoch_ % epochGran == 0:
                 print(f'Epoch {epoch_:>3} | Train Loss: {loss:.3f} | Train Acc: '
                       f'{acc * 100:>6.2f}% | Val Loss: {val_loss:.2f} | '
                       f'Val Acc: {val_acc * 100:.2f}%')
 
-        return model
+        return model, embeddings, outputs, losses, accuracies
 
 
     @torch.no_grad()
@@ -138,33 +152,31 @@ if __name__ == '__main__':
         model.eval()
         _, out = model(data.x, data.edge_index)
         acc = accuracy(out.argmax(dim=1)[data.test_mask], data.y[data.test_mask])
-        # TODO Use TSNE visualisation here after training and compare with results before training.
-        #  Check perplexity value which garners the lowest KL divergence
         return acc
 
 
     """Train and test models"""
-    # Create GCN model
-    gcn = GCN(dataset.num_features, 16, dataset.num_classes)
-    print(gcn)
-    # Train and test
-    train(gcn, data)
-    acc = test(gcn, data)
-    print(f'\nGCN test accuracy: {acc * 100:.2f}%\n')
+    # TODO Revert to True
+    gcnSim = False
+    if gcnSim:
+        # Create GCN model
+        gcn = GCN(dataset.num_features, 16, dataset.num_classes)
+        print(gcn)
+        # Train and test
+        gcn = train(gcn, data)[0]
+        acc = test(gcn, data)
+        print(f'\nGCN test accuracy: {acc * 100:.2f}%\n')
 
     # Create GAT model
     gat = GAT(dataset.num_features, 8, dataset.num_classes)
     print(gat)
     # Train and test
-    train(gat, data)
+    gat, embeddings, outputs, losses, accuracies = train(gat, data)
     acc = test(gat, data)
     print(f'\nGAT test accuracy: {acc * 100:.2f}%\n')
 
     """Visualise embeddings of untrained GAT"""
-    # Initialize a new untrained model
-    untrained_gat = GAT(dataset.num_features, 8, dataset.num_classes)
-    # Get embeddings
-    h, _ = untrained_gat(data.x, data.edge_index)
+    h = embeddings[0]
     # Train TSNE
     tsne = TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(h.detach())
 
@@ -177,8 +189,7 @@ if __name__ == '__main__':
     plt.show()
 
     """Visualise embeddings of trained GAT"""
-    # Get embeddings
-    h, _ = gat(data.x, data.edge_index)
+    h = embeddings[-1]
     # Train TSNE
     tsne = TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(h.detach())
 
@@ -191,8 +202,24 @@ if __name__ == '__main__':
     plt.show()
 
     # TODO Create and save animation of tSNE evolution wrt time
+    def animEmbedtSNE(i):
+        h = embeddings[i]
+        # Train TSNE
+        tsne = TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(h.detach())
+        plt.scatter(tsne[:, 0], tsne[:, 1], s=50, c=data.y)
+        # TODO Plots are superimposed. Fix it
+        plt.title(f'Embedding tSNE\nEpoch {i*epochGran} | Loss: {losses[i]:.2f} | Acc: {accuracies[i] * 100:.2f}%',
+                  fontsize=18, pad=20)
+
+    fig = plt.figure(figsize=(10, 10))
+    plt.axis('off')
+    anim = animation.FuncAnimation(fig, animEmbedtSNE, frames=np.arange(0, len(embeddings)), interval=500)
+    animName = "tSNEEmbedAnim"
+    anim.save(animName + ".mp4", writer="ffmpeg")
+    anim.save(animName + ".gif", writer="pillow")
 
     """Plot bar chart of accuracy wrt node degree of trained GAT"""
+    # TODO Extract output
     # Get model's classifications
     _, out = gat(data.x, data.edge_index)
 
@@ -226,9 +253,11 @@ if __name__ == '__main__':
         plt.text(i, accuracies[i], f'{accuracies[i] * 100:.2f}%', ha='center', color='#0A047A')
         plt.text(i, accuracies[i] // 2, sizes[i], ha='center', color='white')
     plt.title('Accuracy Distribution after Training')
-    plt.savefig('accNodeDegreeEpoch'+str(epoch)+'.png')
+    plt.savefig('accNodeDegreeEpoch' + str(epoch) + '.png')
     plt.show()
 
     toc = time.time()
     print("All simulations completed. Program terminating. Total time taken was",
           str(datetime.timedelta(seconds=toc - tic)))
+
+    # TODO Create and save animation of accuracy
