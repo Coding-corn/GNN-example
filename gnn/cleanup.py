@@ -5,7 +5,7 @@ import shutil
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 # Specify the list of files and folders to keep
-keep_list = ["data", "cleanup.py","main.py", "README.md", "refCode"]
+keep_list = ["cleanup.py", "main.py", "README.md", "refCode", "WIP"]
 
 # Get absolute paths of items to keep
 keep_paths = [os.path.join(THIS_FOLDER, item) for item in keep_list]
