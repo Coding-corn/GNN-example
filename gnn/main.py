@@ -11,9 +11,14 @@
 # decided to present this version here as it is more realistic and a better
 # test bed for future methods.
 
+import datetime
+import time
 import os.path as osp
 
+import networkx as nx
+import pandas as pd
 import torch
+from matplotlib import pyplot as plt, animation
 from sklearn.metrics import average_precision_score, roc_auc_score
 from torch.nn import Linear
 
@@ -27,12 +32,77 @@ from torch_geometric.nn.models.tgn import (
 )
 
 if __name__ == '__main__':
+    # TODO Create seed for random, np and torch for reproducibility of results
+    dpi = 96
+
+    # TODO Revert
+    # epoch = 50
+    epoch = 2
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # TODO Ensure the data si loaded correctly
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'JODIE')
-    dataset = JODIEDataset(path, name='wikipedia')
+    # TODO Maybe swap to a smaller dataset, after fully understanding the paper and data set used
+    path = osp.join(osp.dirname(osp.realpath(__file__)), 'data', 'JODIE')
+    dataset = JODIEDataset(path, name='Wikipedia')
     data = dataset[0]
+
+    src, dst, t, msg = data.src, data.dst, data.t, data.msg
+    # TODO The following analysis may be too task specific to the Wikipedia dataset. Modifications may be needed for other datasets
+    # TODO Revert to True
+    plot_dist = False
+    if plot_dist:
+        # Create a histogram of user interactions with items across all time stamps
+        plt.figure(figsize=(1500 / dpi, 750 / dpi), dpi=dpi)
+        plt.bar(*torch.unique(src, return_counts=True), label='User Interactions')
+        plt.bar(*torch.unique(dst, return_counts=True), label='Item Interactions', color=['forestgreen'])
+        plt.xlim(0, data.num_nodes - 1)
+        plt.ylabel(ylabel="Count")
+        plt.xlabel(xlabel="Index")
+        plt.legend(loc='best')
+        plt.grid(True, which="both", ls=":")
+        plt.title('User-Item Interaction Distribution')
+        plt.tight_layout()
+        plt.savefig('interDist.png', bbox_inches="tight", dpi=dpi)
+        plt.show()
+
+    # TODO Create and equivalent regime for the perspective of an item
+    # TODO Include top k users into animation
+    # Find the user with the most number of interactions
+    u = torch.argmax(torch.unique(src, return_counts=True)[1]).item()
+    # Extract all items which the user interacted with and the corresponding timestamps
+    dst_u = dst[src == u]
+    t_u = t[src == u]
+
+    # Initialise bipartite graph
+    B = nx.Graph()
+    B.add_nodes_from([u], bipartite=0)
+    B.add_nodes_from([v.item() for v in torch.unique(dst_u)], bipartite=1)
+    B.add_edges_from([(u, v.item()) for v in torch.unique(dst_u)])
+    # Separate nodes by group
+    top_nodes = {n for n, d in B.nodes(data=True) if d["bipartite"] == 0}
+    bottom_nodes = set(B) - top_nodes
+    # Get a bipartite layout
+    pos = nx.bipartite_layout(B, top_nodes)
+
+
+    def animate(i):
+        ax.cla()  # Clear the current axes
+        ax.axis('off')
+
+        # Draw nodes, edges, and labels
+        nx.draw_networkx_nodes(B, pos, node_color=['#76b900' if n in top_nodes else '#3b5998' for n in B.nodes()],
+                               ax=ax)
+        nx.draw_networkx_edges(B, pos, edgelist=B.edges(), edge_color='black', ax=ax)
+        # Highlight the currently active interaction in red to distinguish it from the inactive interactions in black
+        nx.draw_networkx_edges(B, pos, edgelist=[(u, dst_u[i].item())], edge_color='red', width=2.0, ax=ax)
+        nx.draw_networkx_labels(B, pos, ax=ax)
+        ax.set_title(f'Time: {t_u[i]}', fontsize=18, pad=20)
+        fig.tight_layout()
+
+
+    fig, ax = plt.subplots(figsize=(12, 12))
+    anim = animation.FuncAnimation(fig, animate, frames=torch.arange(len(t_u)), interval=50, repeat=True)
+    anim.save("user-item.gif", writer="pillow")
 
     # For small datasets, we can put the whole dataset on GPU and thus avoid
     # expensive memory transfer costs for mini-batches:
@@ -88,6 +158,7 @@ if __name__ == '__main__':
 
     memory_dim = time_dim = embedding_dim = 100
 
+    # TODO Print summary of memory, gnn and link_pred modules using torch_geometric.nn.summary
     memory = TGNMemory(
         data.num_nodes,
         data.msg.size(-1),
@@ -186,13 +257,52 @@ if __name__ == '__main__':
             neighbor_loader.insert(batch.src, batch.dst)
         return float(torch.tensor(aps).mean()), float(torch.tensor(aucs).mean())
 
-    # TODO Revert
-    # range(1, 51)
-    for epoch in range(1, 51):
-        # TODO Save csv and jpg file of loss and accuracy. Consider training, validation and test est
-        loss = train()
-        print(f'Epoch: {epoch:02d}, Loss: {loss:.4f}')
-        val_ap, val_auc = test(val_loader)
-        test_ap, test_auc = test(test_loader)
-        print(f'Val AP: {val_ap:.4f}, Val AUC: {val_auc:.4f}')
-        print(f'Test AP: {test_ap:.4f}, Test AUC: {test_auc:.4f}')
+
+    tic = time.time()
+
+    loss, val_ap, val_auc, test_ap, test_auc = [], [], [], [], []
+    # TODO Replace with tqdm, and remove printed output
+    for epoch_ in range(epoch):
+        # TODO Move testing regime outside of training epoch loop. Specify if best checkpoint should be used
+        # TODO Save checkpoint of model parameters after every training epoch
+        loss_ = train()
+        # TODO Unify displayed values to a single line for every epoch, instead of 3 separate lines
+        print(f'Epoch: {epoch_:02d}, Loss: {loss_:.4f}')
+        val_ap_, val_auc_ = test(val_loader)
+        test_ap_, test_auc_ = test(test_loader)
+        print(f'Val AP: {val_ap_:.4f}, Val AUC: {val_auc_:.4f}')
+        print(f'Test AP: {test_ap_:.4f}, Test AUC: {test_auc_:.4f}')
+
+        loss.append(loss_)
+        val_ap.append(val_ap_)
+        val_auc.append(val_auc_)
+        test_ap.append(test_ap_)
+        test_auc.append(test_auc_)
+
+    df = pd.DataFrame({"epoch": range(epoch), "loss": loss, "val_ap": val_ap, "val_auc": val_auc, "test_ap": test_ap,
+                       "test_auc": test_auc})
+    df.to_csv('result.csv', index=False)
+
+    # TODO May need to have separate plots for training and validation/testing
+    plt.figure(figsize=(1500 / dpi, 750 / dpi), dpi=dpi)
+    plt.plot(df["epoch"], df["loss"], label="Train Loss")
+    plt.plot(df["epoch"], df["val_ap"], label="Val AP")
+    plt.plot(df["epoch"], df["val_auc"], label="Val AUC")
+    plt.plot(df["epoch"], df["test_ap"], label="Test AP")
+    plt.plot(df["epoch"], df["test_auc"], label="Test AUC")
+    plt.legend(loc='best')
+    plt.grid(True, which="both", ls=":")
+    plt.xlabel(xlabel="Epoch")
+    plt.xlim(df["epoch"].iloc[0], df["epoch"].iloc[-1])
+    # TODO May have to modify ylim once graphs have been separated accordingly
+    plt.ylim(
+        min(min(df["loss"]), min(df["val_ap"]), min(df["val_auc"]), min(df["test_ap"]), min(df["test_auc"])),
+        max(max(df["loss"]), max(df["val_ap"]), max(df["val_auc"]), max(df["test_ap"]), max(df["test_auc"]))
+    )
+    plt.title('Performance')
+    plt.savefig('result.png', bbox_inches="tight", dpi=dpi)
+    plt.show()
+
+    toc = time.time()
+    print("All simulations completed. Program terminating. Total time taken was",
+          str(datetime.timedelta(seconds=toc - tic)))
