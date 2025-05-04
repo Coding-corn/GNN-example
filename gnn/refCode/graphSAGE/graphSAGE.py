@@ -1,7 +1,7 @@
 import datetime
 import time
 
-from gnn.refCode.graphSAGE.packages.models import *
+from packages.models import *
 
 torch.manual_seed(42)
 import networkx as nx
