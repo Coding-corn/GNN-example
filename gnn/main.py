@@ -11,17 +11,12 @@
 # decided to present this version here as it is more realistic and a better
 # test bed for future methods.
 
-import datetime
-import time
 import os.path as osp
+import time
 
-import networkx as nx
 import pandas as pd
-import torch
-from matplotlib import pyplot as plt, animation
 from sklearn.metrics import average_precision_score, roc_auc_score
 from torch.nn import Linear
-
 from torch_geometric.datasets import JODIEDataset
 from torch_geometric.loader import TemporalDataLoader
 from torch_geometric.nn import TGNMemory, TransformerConv
@@ -30,6 +25,8 @@ from torch_geometric.nn.models.tgn import (
     LastAggregator,
     LastNeighborLoader,
 )
+
+from packages.utils import *
 
 if __name__ == '__main__':
     # TODO Create seed for random, np and torch for reproducibility of results
@@ -46,63 +43,14 @@ if __name__ == '__main__':
     dataset = JODIEDataset(path, name='Wikipedia')
     data = dataset[0]
 
+    # Note that t is in seconds. At a single timestamp, 2 or more interactions can occur simultaneously
     src, dst, t, msg = data.src, data.dst, data.t, data.msg
     # TODO The following analysis may be too task specific to the Wikipedia dataset. Modifications may be needed for other datasets
-    # TODO Revert to True
-    plot_dist = False
-    if plot_dist:
-        # Create a histogram of user interactions with items across all time stamps
-        plt.figure(figsize=(1500 / dpi, 750 / dpi), dpi=dpi)
-        plt.bar(*torch.unique(src, return_counts=True), label='User Interactions')
-        plt.bar(*torch.unique(dst, return_counts=True), label='Item Interactions', color=['forestgreen'])
-        plt.xlim(0, data.num_nodes - 1)
-        plt.ylabel(ylabel="Count")
-        plt.xlabel(xlabel="Index")
-        plt.legend(loc='best')
-        plt.grid(True, which="both", ls=":")
-        plt.title('User-Item Interaction Distribution')
-        plt.tight_layout()
-        plt.savefig('interDist.png', bbox_inches="tight", dpi=dpi)
-        plt.show()
+    # TODO Revert
+    # plot_dist(data)
 
-    # TODO Create and equivalent regime for the perspective of an item
-    # TODO Include top k users into animation
-    # Find the user with the most number of interactions
-    u = torch.argmax(torch.unique(src, return_counts=True)[1]).item()
-    # Extract all items which the user interacted with and the corresponding timestamps
-    dst_u = dst[src == u]
-    t_u = t[src == u]
-
-    # Initialise bipartite graph
-    B = nx.Graph()
-    B.add_nodes_from([u], bipartite=0)
-    B.add_nodes_from([v.item() for v in torch.unique(dst_u)], bipartite=1)
-    B.add_edges_from([(u, v.item()) for v in torch.unique(dst_u)])
-    # Separate nodes by group
-    top_nodes = {n for n, d in B.nodes(data=True) if d["bipartite"] == 0}
-    bottom_nodes = set(B) - top_nodes
-    # Get a bipartite layout
-    pos = nx.bipartite_layout(B, top_nodes)
-
-
-    def animate(i):
-        ax.cla()  # Clear the current axes
-        ax.axis('off')
-
-        # Draw nodes, edges, and labels
-        nx.draw_networkx_nodes(B, pos, node_color=['#76b900' if n in top_nodes else '#3b5998' for n in B.nodes()],
-                               ax=ax)
-        nx.draw_networkx_edges(B, pos, edgelist=B.edges(), edge_color='black', ax=ax)
-        # Highlight the currently active interaction in red to distinguish it from the inactive interactions in black
-        nx.draw_networkx_edges(B, pos, edgelist=[(u, dst_u[i].item())], edge_color='red', width=2.0, ax=ax)
-        nx.draw_networkx_labels(B, pos, ax=ax)
-        ax.set_title(f'Time: {t_u[i]}', fontsize=18, pad=20)
-        fig.tight_layout()
-
-
-    fig, ax = plt.subplots(figsize=(12, 12))
-    anim = animation.FuncAnimation(fig, animate, frames=torch.arange(len(t_u)), interval=50, repeat=True)
-    anim.save("user-item.gif", writer="pillow")
+    # TODO Revert
+    # anim(data)
 
     # For small datasets, we can put the whole dataset on GPU and thus avoid
     # expensive memory transfer costs for mini-batches:
