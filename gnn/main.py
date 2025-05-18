@@ -33,8 +33,8 @@ if __name__ == '__main__':
     dpi = 96
 
     # TODO Revert
-    # epoch = 50
-    epoch = 2
+    epoch = 50
+    # epoch = 2
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
