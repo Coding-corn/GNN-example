@@ -6,8 +6,8 @@ THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 # Specify the list of files and folders to keep
 # TODO Revert
-# keep_list = ["cleanup.py", "main.py", "README.md", "refCode", "WIP"]
-keep_list = ["cleanup.py", "main.py", "README.md", "refCode", "WIP", "packages"]
+# keep_list = ["cleanup.py", "main.py", "README.md"]
+keep_list = ["cleanup.py", "main.py", "README.md", "packages"]
 
 # Get absolute paths of items to keep
 keep_paths = [os.path.join(THIS_FOLDER, item) for item in keep_list]
