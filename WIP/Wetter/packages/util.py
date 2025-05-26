@@ -3,11 +3,9 @@ import time
 from datetime import datetime
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from concurrent.futures import ProcessPoolExecutor
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.io.shapereader as shpreader
-import imageio
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -18,74 +16,6 @@ from matplotlib import pyplot as plt, animation
 import matplotlib
 from tqdm import tqdm
 import glob
-
-
-def plot_frame(idx):
-    # Prepare figure/axes (local per-process)
-    fig, ax = plt.subplots(figsize=(7, 9), dpi=dpi, subplot_kw={'projection': ccrs.Mercator()})
-    ax.set_extent([5.5, 15.5, 47, 55], crs=ccrs.PlateCarree())
-    ax.add_feature(cfeature.BORDERS, linewidth=1)
-    ax.add_feature(cfeature.COASTLINE, linewidth=1)
-
-    # Draw Germany outline
-    countries_shp = shpreader.natural_earth(resolution='110m', category='cultural', name='admin_0_countries')
-    for record in shpreader.Reader(countries_shp).records():
-        if record.attributes['NAME'] == 'Germany':
-            ax.add_geometries(
-                [record.geometry],
-                crs=ccrs.PlateCarree(),
-                edgecolor='red',
-                facecolor='none',
-                linewidth=2
-            )
-
-    G = nx.Graph()
-    idx_valid = df_all.loc[idx].dropna().index.astype(np.int64)
-    df_stat_ = df_stat[df_stat['Stations_id'].isin(idx_valid)]
-    for row, temp in zip(df_stat_.iterrows(), list(df_all.loc[idx].dropna())):
-        row = row[1]
-        G.add_node(row['Stations_id'], pos=(row['geoLaenge'], row['geoBreite']), temp=temp)
-
-    adj_mat_ = adj_mat[idx_valid].loc[idx_valid]
-    n = len(adj_mat_)
-    edges = [
-        (adj_mat_.index[i], adj_mat_.columns[j])
-        for i in range(n) for j in range(i + 1, n) if adj_mat_.iloc[i, j] == 1
-    ]
-    G.add_edges_from(edges)
-
-    pos = nx.get_node_attributes(G, 'pos')
-    for node_i, node_j in G.edges:
-        lon_i, lat_i = pos[node_i]
-        lon_j, lat_j = pos[node_j]
-        ax.plot([lon_i, lon_j], [lat_i, lat_j], color="black", linewidth=0.7, transform=ccrs.PlateCarree())
-
-    norm = matplotlib.colors.Normalize(vmin=min_temp, vmax=max_temp)
-    cmap = plt.cm.viridis
-
-    sc = ax.scatter(
-        [G.nodes[n]['pos'][0] for n in G.nodes],
-        [G.nodes[n]['pos'][1] for n in G.nodes],
-        c=[G.nodes[n]['temp'] for n in G.nodes],
-        cmap=cmap,
-        norm=norm,
-        s=20,
-        edgecolor='k',
-        transform=ccrs.PlateCarree(),
-        zorder=3
-    )
-
-    ax.set_title(format_int_date(idx))
-    fig.tight_layout()
-    # Colorbar
-    cb = fig.colorbar(sc, ax=ax, orientation='horizontal', shrink=0.5, fraction=0.03, pad=0.005,
-                      label='Temperature')
-
-    # Save the frame
-    outdir = "frames"
-    os.makedirs(outdir, exist_ok=True)
-    fig.savefig(os.path.join(outdir, f"frame_{idx}.png"))
-    plt.close(fig)
 
 
 def download_data(dpi = 96):
@@ -305,35 +235,109 @@ def download_data(dpi = 96):
         # Extract min and max temperature for heatmap
         min_temp, max_temp = np.nanmin(df_all.values), np.nanmax(df_all.values)
 
-        def get_ordinal(n):
-            if n % 10 == 1:
-                return f"{n}st"
-            elif n % 10 == 2:
-                return f"{n}nd"
-            elif n % 10 == 3:
-                return f"{n}rd"
-            else:
-                return f"{n}th"
+        def animate(idx):
+            ax.cla()  # Clear the current axes
 
-        def format_int_date(date_int):
-            date = datetime.strptime(str(date_int), "%Y%m%d")
-            day = get_ordinal(date.day)
-            month = date.strftime("%b")
-            year = date.year
-            return f"{day} {month} {year}"
+            ax.set_extent([5.5, 15.5, 47, 55], crs=ccrs.PlateCarree())
+            # Add country borders
+            ax.add_feature(cfeature.BORDERS, linewidth=1)
+            ax.add_feature(cfeature.COASTLINE, linewidth=1)
 
-        indices = list(df_all.index)
-        with ProcessPoolExecutor() as executor:
-            list(tqdm(executor.map(plot_frame, indices), total=len(indices), ncols=100, desc="Plotting frames"))
+            # Draw Germany outline
+            countries_shp = shpreader.natural_earth(resolution='110m', category='cultural', name='admin_0_countries')
+            for record in shpreader.Reader(countries_shp).records():
+                if record.attributes['NAME'] == 'Germany':
+                    ax.add_geometries(
+                        [record.geometry],
+                        crs=ccrs.PlateCarree(),
+                        edgecolor='red',
+                        facecolor='none',
+                        linewidth=2
+                    )
 
-        # OPTIONAL: combine PNGs into a GIF
-        print("Stitching PNGs into GIF...")
-        images = []
-        for idx in indices:
-            filename = os.path.join("frames", f"frame_{idx}.png")
-            images.append(imageio.imread(filename))
-        imageio.mimsave("stations.gif", images, duration=0.125)
-        print("Saved stations.gif")
+            # Create a graph
+            G = nx.Graph()
+            # Extract dataframe corresponding to the relevant nodes at the current timestamp
+            df_stat_ = df_stat[df_stat['Stations_id'].isin(df_all.loc[idx].dropna().index.astype(np.int64))]
+            for row, temp in zip(df_stat_.iterrows(), list(df_all.loc[idx].dropna())):
+                # Remove row index
+                row = row[1]
+                G.add_node(row['Stations_id'], pos=(row['geoLaenge'], row['geoBreite']), temp=temp)
+
+            # Extract adjacency matrix corresponding to relevant nodes at the current timestamp
+            adj_mat_ = adj_mat[df_all.loc[idx].dropna().index.astype(np.int64)].loc[df_all.loc[idx].dropna().index.astype(np.int64)]
+            n = len(adj_mat_)
+            # Add edges based on the adjacency matrix
+            edges = [
+                (adj_mat_.index[i], adj_mat_.columns[j])
+                for i in range(n) for j in range(i + 1, n) if adj_mat_.iloc[i, j] == 1
+            ]
+            G.add_edges_from(edges)
+
+            # Extract node positions for plotting
+            pos = nx.get_node_attributes(G, 'pos')
+            # Plot edges in black
+            for node_i, node_j in G.edges:
+                lon_i, lat_i = pos[node_i]
+                lon_j, lat_j = pos[node_j]
+                ax.plot([lon_i, lon_j], [lat_i, lat_j], color="black", linewidth=0.7, transform=ccrs.PlateCarree())
+
+            # Plot nodes as a scatter plot using ax
+            ax.scatter(
+                [G.nodes[n]['pos'][0] for n in G.nodes],  # Longitude
+                [G.nodes[n]['pos'][1] for n in G.nodes],  # Latitude
+                c=[G.nodes[n]['temp'] for n in G.nodes],  # Temperature
+                cmap=cmap,
+                norm=norm,
+                s=20,  # Node size, adjust as needed
+                edgecolor='k',
+                transform=ccrs.PlateCarree(),  # If using Cartopy
+                zorder=3
+            )
+
+            def get_ordinal(n):
+                # Determine the ordinal suffix for a given number
+                if n % 10 == 1:
+                    return f"{n}st"
+                elif n % 10 == 2:
+                    return f"{n}nd"
+                elif n % 10 == 3:
+                    return f"{n}rd"
+                else:
+                    return f"{n}th"
+
+            def format_int_date(date_int):
+                # Parse integer to date
+                date = datetime.strptime(str(date_int), "%Y%m%d")
+                day = get_ordinal(date.day)
+                month = date.strftime("%b")
+                year = date.year
+                return f"{day} {month} {year}"
+
+            ax.set_title(format_int_date(idx))
+            fig.tight_layout()
+
+        def progress_callback(current_frame, total_frames):
+            # tqdm uses 0-based, so add 1 to avoid off-by-one errors
+            pbar.n = current_frame + 1
+            pbar.refresh()
+
+        # Set up the Cartopy map
+        fig, ax = plt.subplots(figsize=(7, 9), dpi=dpi, subplot_kw={'projection': ccrs.Mercator()})
+        # Set up normalization and colormap before the animation
+        norm = matplotlib.colors.Normalize(vmin=min_temp, vmax=max_temp)
+        cmap = plt.cm.viridis
+
+        # Create a dummy scatter so the colorbar has something to attach to
+        dummy_sc = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=20)
+        fig.colorbar(dummy_sc, ax=ax, orientation='horizontal', shrink=0.5, fraction=0.03, pad=0.005, label='Temperature')
+        del dummy_sc  # Remove the dummy scatter after creating the colorbar
+        anim = animation.FuncAnimation(fig, animate, frames=list(df_all.index), interval=125, repeat=True)
+        # Create tqdm progress bar with the total number of frames
+        pbar = tqdm(total=len(df_all.index), desc="Frames", ncols=100)
+        # Pass the progress_callback to save; tqdm will close itself after
+        anim.save("stations.gif", writer="pillow", progress_callback=progress_callback)
+        pbar.close()
 
 # TODO Create function
 def preprocess_data():
