@@ -1,8 +1,10 @@
 import os
 import time
-from datetime import datetime
+import datetime
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import reduce
+
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.io.shapereader as shpreader
@@ -18,14 +20,13 @@ from tqdm import tqdm
 import glob
 
 
-def download_data(dpi = 96):
-    # TODO Check if all preprocessed files are present and delete all other files
-    # Step 1: Set the URL of the directory containing .zip files
-    base_url = "https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/daily/kl/historical/"
-
-    # Step 2: Create a local folder to save the downloads
+def preprocess_data(dpi=96):
+    # Step 1: Create a local folder to save the downloads
     data_folder = "data"
     os.makedirs(data_folder, exist_ok=True)
+
+    # Step 2: Set the URL of the directory containing .zip files
+    base_url = "https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/daily/kl/historical/"
 
     # Step 3: Scrape .zip file names
     print("Fetching file list...")
@@ -33,137 +34,176 @@ def download_data(dpi = 96):
     response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    zip_files = [link.get('href') for link in soup.find_all('a') if link.get('href', '').endswith('.zip')]
-    print(f"Found {len(zip_files)} ZIP files.")
+    # Essential files to keep
+    keep_list = ["df_all.txt", "dist_mat.txt", "KL_Tageswerte_Beschreibung_Stationen.txt"]
+    # Get absolute paths of items to keep
+    keep_paths = [os.path.join(data_folder, item) for item in keep_list]
+    miss_paths = [path for path in keep_paths if not os.path.exists(path)]
 
-    def download_file(fname):
-        file_url = base_url + fname
-        local_path = os.path.join(data_folder, fname)
-        if os.path.exists(local_path):
-            return
-        with requests.get(file_url, stream=True) as r:
-            r.raise_for_status()
-            with open(local_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=1024):
-                    if chunk:
-                        f.write(chunk)
+    def delete_file():
+        # Delete unnecessary files
+        print(f"The following files are missing: {miss_paths}")
+        print("Deleting all other files...")
+        for file in os.listdir(data_folder):
+            if file not in keep_list:
+                os.remove(os.path.join(data_folder, file))
+        print("All other files deleted.")
 
-    # Step 4: Download ZIP files in parallel
-    with ThreadPoolExecutor(max_workers=2 * os.cpu_count()) as executor:
-        futures = [executor.submit(download_file, fname) for fname in zip_files]
-        for _ in tqdm(as_completed(futures), total=len(futures), ncols=100, desc="Downloading files"):
-            pass  # tqdm will update progress as each future completes
+    if not miss_paths:
+        delete_file()
 
-    # Step 5: Unzip and extract only files starting with 'produkt'
-    print("Unzipping only 'produkt' files...")
-    for fname in tqdm(zip_files, ncols=100, desc="Unzipping files"):
-        local_zip_path = os.path.join(data_folder, fname)
-        with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
-            # Filter members whose filenames start with 'produkt'
-            member = [m for m in zip_ref.namelist() if os.path.basename(m).startswith('produkt')][0]
-            # Optional: Skip if already unzipped
-            if os.path.exists(os.path.join(data_folder, member)):
-                continue
-            if member:  # Only extract if there are such files
-                zip_ref.extract(member, data_folder)
-    print("Selected files extracted.")
+        # Read data
+        local_path = os.path.join(data_folder, "df_all.txt")
+        df_all = pd.read_csv(local_path, index_col=0)
 
-    # Read temperature data from all produkt files and compile them into a single dataframe
-    local_path = os.path.join(data_folder, "df_all.txt")
-    if not os.path.exists(local_path):
-        # Find all txt files that start with 'produkt'
-        txt_files = glob.glob(os.path.join(data_folder, 'produkt*.txt'))
-        # Keys correspond to the station
-        keys = [pd.read_csv(f, sep=';', encoding='latin1').loc[:, ["STATIONS_ID"]].values[0, 0] for f in
-                tqdm(txt_files, ncols=100, desc="Reading keys")]
-        # Get indices for sorting keys
-        idx = sorted(range(len(keys)), key=lambda k: keys[k])
-        # Sort keys in ascending order
-        keys = [keys[i] for i in idx]
-        # Values correspond to the dataframe
-        values = [pd.read_csv(f, sep=';', encoding='latin1').loc[:, ["MESS_DATUM", " TMK"]] for f in
-                  tqdm(txt_files, ncols=100, desc="Reading values")]
-        # Sort values in corresponding order
-        values = [values[i] for i in idx]
+        # Download the .txt file
+        txt_files = [link.get('href') for link in soup.find_all('a') if link.get('href', '').endswith('.txt')][0]
+        local_path = os.path.join(data_folder, txt_files)
 
-        # Read and concatenate all data into a single DataFrame
-        dates = sorted(set(np.concatenate([f.loc[:, ["MESS_DATUM"]].values.ravel() for f in values])))
-        # Initialize dataframe with NaN
-        df_all = pd.DataFrame(np.nan, index=dates, columns=keys)
-        df_all.index.name = "Date"
-        for key, value in zip(keys, values):
-            df_all.loc[value.loc[:, ["MESS_DATUM"]].values.ravel(), [key]] = value.loc[:, [" TMK"]].values
-        # Replace all -999.0 values with NaN
-        df_all.replace(-999.0, np.nan, inplace=True)
-        df_all.to_csv(local_path, index=True)
-        del txt_files, keys, values, idx, dates, df_all
-    df_all = pd.read_csv(local_path, index_col=0)
+        # Read column names from the first line
+        with open(local_path, 'r', encoding='latin1') as f:
+            columns = f.readline().strip().split()
 
-    # TODO Revert, and delete the produkt files. Shift accordingly
-    # # Delete all .zip files in the output folder
-    # print("Deleting .zip files...")
-    # for file in os.listdir(data_folder):
-    #     if file.endswith('.zip'):
-    #         os.remove(os.path.join(data_folder, file))
-    # print(".zip files deleted.")
+        # Read the fixed-width formatted file
+        df_stat = pd.read_fwf(
+            local_path,
+            skiprows=2,  # Skip the header and the line of dashes
+            header=None,  # no header in the actual data rows
+            names=columns,  # set your custom column names
+            encoding='latin1'  # To handle special characters
+        )
+        # Remove rows from df_stat corresponding to all stations which are not present in df_all
+        df_stat = df_stat[df_stat['Stations_id'].isin(df_all.columns.values.astype(np.int64))]
 
-    # Download the .txt file
-    txt_files = [link.get('href') for link in soup.find_all('a') if link.get('href', '').endswith('.txt')][0]
-    file_url = base_url + txt_files
-    local_path = os.path.join(data_folder, txt_files)
+        n = len(df_stat)
+        local_path = os.path.join(data_folder, 'dist_mat.txt')
+        dist_mat = pd.read_csv(local_path).iloc[:, 1:].values
+    else:
+        zip_files = [link.get('href') for link in soup.find_all('a') if link.get('href', '').endswith('.zip')]
+        print(f"Found {len(zip_files)} ZIP files.")
 
-    # Download the file
-    print(f"Downloading {txt_files} from {file_url} ...")
-    response = requests.get(file_url)
-    response.raise_for_status()  # check for errors
-    with open(local_path, 'wb') as f:
-        f.write(response.content)
-    print(f"{txt_files} has been downloaded to {local_path}")
+        def download_file(fname):
+            file_url = base_url + fname
+            local_path = os.path.join(data_folder, fname)
+            if os.path.exists(local_path):
+                return
+            with requests.get(file_url, stream=True) as r:
+                r.raise_for_status()
+                with open(local_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=1024):
+                        if chunk:
+                            f.write(chunk)
 
-    # Read column names from the first line
-    with open(local_path, 'r', encoding='latin1') as f:
-        columns = f.readline().strip().split()
-
-    # Read the fixed-width formatted file
-    df_stat = pd.read_fwf(
-        local_path,
-        skiprows=2,  # Skip the header and the line of dashes
-        header=None,  # no header in the actual data rows
-        names=columns,  # set your custom column names
-        encoding='latin1'  # To handle special characters
-    )
-    # Remove rows from df_stat corresponding to all stations which are not present in df_all
-    df_stat = df_stat[df_stat['Stations_id'].isin(df_all.columns.values.astype(np.int64))]
-
-    # Compute matrix of geodesic distances between stations
-    n = len(df_stat)
-    local_path = os.path.join(data_folder, 'dist_mat.txt')
-    if not os.path.exists(local_path):
-        # Prepare the positions as (lat, lon) tuples
-        pos = list(zip(df_stat['geoBreite'], df_stat['geoLaenge']))
-
-        # Initialize the distance matrix
-        dist_mat = np.zeros((n, n))
-
-        # Prepare all unique (i, j) pairs in the upper triangle
-        pairs = [(i, j) for i in range(n) for j in range(i + 1, n)]
-
-        def compute_distance(pair):
-            i, j = pair
-            return (i, j, geodesic(pos[i], pos[j]).kilometers)
-
+        # Step 4: Download ZIP files in parallel
         with ThreadPoolExecutor(max_workers=2 * os.cpu_count()) as executor:
-            futures = [executor.submit(compute_distance, pair) for pair in
-                       tqdm(pairs, ncols=100, desc="Preparing distances")]
-            for f in tqdm(as_completed(futures), total=len(futures), ncols=100, desc="Calculating distances"):
-                i, j, dist = f.result()
-                dist_mat[i, j] = dist
-                dist_mat[j, i] = dist  # symmetric
+            futures = [executor.submit(download_file, fname) for fname in zip_files]
+            for _ in tqdm(as_completed(futures), total=len(futures), ncols=100, desc="Downloading files"):
+                pass  # tqdm will update progress as each future completes
 
-        # Create a DataFrame with station IDs as labels
-        dist_mat = pd.DataFrame(dist_mat, index=df_stat['Stations_id'], columns=df_stat['Stations_id'])
-        dist_mat.to_csv(local_path)
-    dist_mat = pd.read_csv(local_path).iloc[:, 1:].values
+        # Step 5: Unzip and extract only files starting with 'produkt'
+        print("Unzipping only 'produkt' files...")
+        for fname in tqdm(zip_files, ncols=100, desc="Unzipping files"):
+            local_zip_path = os.path.join(data_folder, fname)
+            with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
+                # Filter members whose filenames start with 'produkt'
+                member = [m for m in zip_ref.namelist() if os.path.basename(m).startswith('produkt')][0]
+                # Optional: Skip if already unzipped
+                if os.path.exists(os.path.join(data_folder, member)):
+                    continue
+                if member:  # Only extract if there are such files
+                    zip_ref.extract(member, data_folder)
+        print("Selected files extracted.")
+
+        # Read temperature data from all produkt files and compile them into a single dataframe
+        local_path = os.path.join(data_folder, "df_all.txt")
+        if not os.path.exists(local_path):
+            # Find all txt files that start with 'produkt'
+            txt_files = glob.glob(os.path.join(data_folder, 'produkt*.txt'))
+            # Keys correspond to the station
+            keys = [pd.read_csv(f, sep=';', encoding='latin1').loc[:, ["STATIONS_ID"]].values[0, 0] for f in
+                    tqdm(txt_files, ncols=100, desc="Reading keys")]
+            # Get indices for sorting keys
+            idx = sorted(range(len(keys)), key=lambda k: keys[k])
+            # Sort keys in ascending order
+            keys = [keys[i] for i in idx]
+            # Values correspond to the dataframe
+            values = [pd.read_csv(f, sep=';', encoding='latin1').loc[:, ["MESS_DATUM", " TMK"]] for f in
+                      tqdm(txt_files, ncols=100, desc="Reading values")]
+            # Sort values in corresponding order
+            values = [values[i] for i in idx]
+
+            # Read and concatenate all data into a single DataFrame
+            dates = sorted(set(np.concatenate([f.loc[:, ["MESS_DATUM"]].values.ravel() for f in values])))
+            # Initialize dataframe with NaN
+            df_all = pd.DataFrame(np.nan, index=dates, columns=keys)
+            df_all.index.name = "Date"
+            for key, value in zip(keys, values):
+                df_all.loc[value.loc[:, ["MESS_DATUM"]].values.ravel(), [key]] = value.loc[:, [" TMK"]].values
+            # Replace all -999.0 values with NaN
+            df_all.replace(-999.0, np.nan, inplace=True)
+            df_all.to_csv(local_path, index=True)
+            del txt_files, keys, values, idx, dates, df_all
+        df_all = pd.read_csv(local_path, index_col=0)
+
+        # Download the .txt file
+        txt_files = [link.get('href') for link in soup.find_all('a') if link.get('href', '').endswith('.txt')][0]
+        file_url = base_url + txt_files
+        local_path = os.path.join(data_folder, txt_files)
+
+        # Download the file
+        print(f"Downloading {txt_files} from {file_url} ...")
+        response = requests.get(file_url)
+        response.raise_for_status()  # check for errors
+        with open(local_path, 'wb') as f:
+            f.write(response.content)
+        print(f"{txt_files} has been downloaded to {local_path}")
+
+        # Read column names from the first line
+        with open(local_path, 'r', encoding='latin1') as f:
+            columns = f.readline().strip().split()
+
+        # Read the fixed-width formatted file
+        df_stat = pd.read_fwf(
+            local_path,
+            skiprows=2,  # Skip the header and the line of dashes
+            header=None,  # no header in the actual data rows
+            names=columns,  # set your custom column names
+            encoding='latin1'  # To handle special characters
+        )
+        # Remove rows from df_stat corresponding to all stations which are not present in df_all
+        df_stat = df_stat[df_stat['Stations_id'].isin(df_all.columns.values.astype(np.int64))]
+
+        # Compute matrix of geodesic distances between stations
+        n = len(df_stat)
+        local_path = os.path.join(data_folder, 'dist_mat.txt')
+        if not os.path.exists(local_path):
+            # Prepare the positions as (lat, lon) tuples
+            pos = list(zip(df_stat['geoBreite'], df_stat['geoLaenge']))
+
+            # Initialize the distance matrix
+            dist_mat = np.zeros((n, n))
+
+            # Prepare all unique (i, j) pairs in the upper triangle
+            pairs = [(i, j) for i in range(n) for j in range(i + 1, n)]
+
+            def compute_distance(pair):
+                i, j = pair
+                return (i, j, geodesic(pos[i], pos[j]).kilometers)
+
+            with ThreadPoolExecutor(max_workers=2 * os.cpu_count()) as executor:
+                futures = [executor.submit(compute_distance, pair) for pair in
+                           tqdm(pairs, ncols=100, desc="Preparing distances")]
+                for f in tqdm(as_completed(futures), total=len(futures), ncols=100, desc="Calculating distances"):
+                    i, j, dist = f.result()
+                    dist_mat[i, j] = dist
+                    dist_mat[j, i] = dist  # symmetric
+
+            # Create a DataFrame with station IDs as labels
+            dist_mat = pd.DataFrame(dist_mat, index=df_stat['Stations_id'], columns=df_stat['Stations_id'])
+            dist_mat.to_csv(local_path)
+        dist_mat = pd.read_csv(local_path).iloc[:, 1:].values
+
+        delete_file()
 
     # Initialize adjacency matrix
     adj_mat = np.zeros((n, n), dtype=np.uint8)
@@ -231,9 +271,10 @@ def download_data(dpi = 96):
 
     # Create and save animation, with each node's colour corresponding to the temperature
     if not os.path.exists("stations.gif"):
-        df_all = df_all[-10:]  # TODO Remove truncation
+        # Adjust slicing. Should not exceed 10 years
+        df_all_ = df_all[-365:]
         # Extract min and max temperature for heatmap
-        min_temp, max_temp = np.nanmin(df_all.values), np.nanmax(df_all.values)
+        min_temp, max_temp = np.nanmin(df_all_.values), np.nanmax(df_all_.values)
 
         def animate(idx):
             ax.cla()  # Clear the current axes
@@ -258,14 +299,15 @@ def download_data(dpi = 96):
             # Create a graph
             G = nx.Graph()
             # Extract dataframe corresponding to the relevant nodes at the current timestamp
-            df_stat_ = df_stat[df_stat['Stations_id'].isin(df_all.loc[idx].dropna().index.astype(np.int64))]
-            for row, temp in zip(df_stat_.iterrows(), list(df_all.loc[idx].dropna())):
+            df_stat_ = df_stat[df_stat['Stations_id'].isin(df_all_.loc[idx].dropna().index.astype(np.int64))]
+            for row, temp in zip(df_stat_.iterrows(), list(df_all_.loc[idx].dropna())):
                 # Remove row index
                 row = row[1]
                 G.add_node(row['Stations_id'], pos=(row['geoLaenge'], row['geoBreite']), temp=temp)
 
             # Extract adjacency matrix corresponding to relevant nodes at the current timestamp
-            adj_mat_ = adj_mat[df_all.loc[idx].dropna().index.astype(np.int64)].loc[df_all.loc[idx].dropna().index.astype(np.int64)]
+            adj_mat_ = adj_mat[df_all_.loc[idx].dropna().index.astype(np.int64)].loc[
+                df_all_.loc[idx].dropna().index.astype(np.int64)]
             n = len(adj_mat_)
             # Add edges based on the adjacency matrix
             edges = [
@@ -330,20 +372,30 @@ def download_data(dpi = 96):
 
         # Create a dummy scatter so the colorbar has something to attach to
         dummy_sc = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=20)
-        fig.colorbar(dummy_sc, ax=ax, orientation='horizontal', shrink=0.5, fraction=0.03, pad=0.005, label='Temperature')
+        fig.colorbar(dummy_sc, ax=ax, orientation='horizontal', shrink=0.5, fraction=0.03, pad=0.005,
+                     label='Temperature')
         del dummy_sc  # Remove the dummy scatter after creating the colorbar
-        anim = animation.FuncAnimation(fig, animate, frames=list(df_all.index), interval=125, repeat=True)
+        anim = animation.FuncAnimation(fig, animate, frames=list(df_all_.index), interval=125, repeat=True)
         # Create tqdm progress bar with the total number of frames
-        pbar = tqdm(total=len(df_all.index), desc="Frames", ncols=100)
+        pbar = tqdm(total=len(df_all_.index), desc="Frames", ncols=100)
         # Pass the progress_callback to save; tqdm will close itself after
         anim.save("stations.gif", writer="pillow", progress_callback=progress_callback)
         pbar.close()
 
-# TODO Create function
-def preprocess_data():
-    pass
-
-
-# TODO Create function
-def delete_data():
-    pass
+    # Preprocessing: Ensure that each consecutive snapshot has the exact same active nodes
+    # Extract the most recent snapshots
+    # TODO Set truncation as variable
+    df_all_ = df_all[10 * -365:]
+    # Get active stations at every timestamp
+    act_nodes = []
+    for idx, row in df_all_.iterrows():
+        act_nodes.append(row.dropna().index.astype(np.int64))
+    # Get stations which are always active at every time instance
+    act_nodes = reduce(lambda x, y: x.intersection(y), act_nodes)
+    # Extract adjacency matrix corresponding to active nodes
+    adj_mat_ = adj_mat[act_nodes].loc[act_nodes]
+    # Check if the graph is connected
+    if (~adj_mat_.any(axis=0)).any():
+        raise Exception("Graph is not connected. Choose a higher threshold.")
+    if adj_mat_.empty:
+        raise Exception("No nodes present.")
